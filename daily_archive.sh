@@ -1,5 +1,6 @@
 #!/bin/bash
 # sakura cloud daily archive script by CLES
+# jq version by wakax
 
 SCRIPT_DIR=`dirname $0`
 cd $SCRIPT_DIR
@@ -33,12 +34,12 @@ get_old_archive_list(){
   if [ "$#" -ne 3 ] ; then
     return 1
   fi
-  sa_api "/archive" "GET" "" - | json Archives | json -C "this.Scope == 'user' && this.Description == '${3}' && this.SourceDisk.ID == '${1}' && this.ID != '${2}' " | json -a ID Name
+  sa_api "/archive" "GET" "" - | jq -r ".Archives|map(select(.Scope==\"user\" and .Description==\"${3}\" and .SourceDisk.ID==\"${1}\" and .ID != \"${2}\"))|map(.ID + \" \" + .Name)[]"
   return ${PIPESTATUS[0]}
 }
 
 get_disk_list(){
-  sa_api "/disk" "GET" "" - | json Disks | json -a ID Name
+  sa_api "/disk" "GET" "" - | jq -r '.Disks|map(.ID + " " + .Name)[]'
   return ${PIPESTATUS[0]}
 }
 
@@ -54,7 +55,7 @@ archive_availability(){
   if [ "$#" -ne 1 ] ; then
     return 1
   fi
-  sa_api "/archive/${1}" "GET" "" - | json Archive.Availability
+  sa_api "/archive/${1}" "GET" "" - | jq -r ".Archive.Availability"
   return ${PIPESTATUS[0]}
 }
 
@@ -62,8 +63,7 @@ archive_status(){
   if [ "$#" -ne 1 ] ; then
     return 1
   fi
-  ARCSTAT=(`sa_api "/archive/${1}" "GET" "" - | json -a Archive.SizeMB Archive.MigratedMB`)
-  echo -n "${ARCSTAT[1]}/${ARCSTAT[0]}MB"
+  sa_api "/archive/${1}" "GET" "" - | jq -r '"\(.Archive.MigratedMB)/\(.Archive.SizeMB)MB"'
 }
 
 sleep_until_archive_is_available(){
@@ -91,14 +91,14 @@ delete_archive(){
 ###### MAIN Routine #####
 
 cmd_check curl
-cmd_check json
+cmd_check jq
 
 CONFIG="./config.json"
 if [ -n "$1" ] ; then
     CONFIG="$1"
 fi
 
-read SEC_TOKEN SEC_SECRET SC_ZONE < <( json -a token secret zone < $CONFIG )
+read SEC_TOKEN SEC_SECRET SC_ZONE < <( jq -r '.token + " " + .secret + " " + .zone' < $CONFIG )
 
 logger "===== START ====="
 TIMESTAMP="`date "+%Y%m%d"`"
@@ -113,7 +113,7 @@ get_disk_list | while read DISK_ID DISK_NAME ; do
   logger "create_archive()"
   create_archive "${DISK_NAME}-${TIMESTAMP}" "$DISK_ID" "$TMP_ARCHIVE_JSON" "$DESCRIPTION"
   chmod 600 "$TMP_ARCHIVE_JSON"
-  read ARCHIVE_ID ARVHIVE_NAME < <( json -a Archive.ID Archive.Name < $TMP_ARCHIVE_JSON )
+  read ARCHIVE_ID ARVHIVE_NAME < <( jq -r '.Archive.ID + " " + .Archive.Name' < $TMP_ARCHIVE_JSON )
   if [ -z "$ARCHIVE_ID" ]; then
     logger "ARCHIVE_ID is null"
     continue
